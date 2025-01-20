@@ -1,0 +1,1201 @@
+---
+title: "case 1 code final"
+format: html
+editor: visual
+---
+
+## data
+
+### descriptive statistics
+
+```{r}
+rm(list = ls())
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(psych)
+library(knitr)
+library(miscTools)
+library(gridExtra)
+library(car)
+library(mosaic)
+library(sfaR)
+library(readr)
+library(fastmap)
+library(kableExtra)
+```
+
+```{r}
+df_rice1 <- read_csv("~/r/SOK-3011/RiceFarms.csv")
+
+
+df_rice <- df_rice1[, !names(df_rice1) %in% c("rownames", "id", "status", "varieties", "bimas", "region")]
+summary(df_rice)
+```
+
+```{r}
+logmodel <- df_rice %>%
+  mutate(
+    log_goutput = log(goutput),   
+    log_seed = log(seed),         
+    log_urea = log(urea),         
+    log_totlabor = log(totlabor), 
+    log_size = log(size), 
+    log_phosphate = ifelse(phosphate > 0, log(phosphate), 0)  
+  )
+
+linear_model <- lm(goutput ~ seed + urea + totlabor + size + phosphate, data = df_rice)
+
+cobb_douglas <- lm(log_goutput ~ log_seed + log_urea + log_totlabor + log_size+
+                     log_phosphate, data = logmodel)
+
+quadratic_model <- lm(goutput ~ seed + urea + totlabor + size + phosphate + 
+                        I(0.5 * seed^2) + I(0.5 * urea^2) + I(0.5 * totlabor^2) + I(0.5 * size^2) + I(0.5 * phosphate^2) +
+                        I(seed * urea) + I(seed * totlabor) + I(seed * size) + I(seed * phosphate) +
+                        I(urea * totlabor) + I(urea * size) + I(urea * phosphate) +
+                        I(totlabor * size) + I(totlabor * phosphate) +
+                        I(size * phosphate),
+                      data = df_rice)
+
+translog_model <- lm(
+  log_goutput ~ log_seed + log_urea + log_totlabor + log_size + log_phosphate +
+    I(0.5 * log_seed^2) + I(0.5 * log_urea^2) + I(0.5 * log_totlabor^2) + I(0.5 * log_size^2) + I(0.5 * log_phosphate^2) +
+    I(log_seed * log_urea) + I(log_seed * log_totlabor) + I(log_seed * log_size) + I(log_seed * log_phosphate) +
+    I(log_urea * log_totlabor) + I(log_urea * log_size) + I(log_urea * log_phosphate) +
+    I(log_totlabor * log_size) + I(log_totlabor * log_phosphate) +
+    I(log_size * log_phosphate),
+  data = logmodel
+)
+```
+
+```{r}
+summary_stats <- summary(linear_model)$coefficients %>%
+  as.data.frame() %>%
+  mutate(
+    model = "Linear"
+  ) %>%
+  bind_rows(
+    summary(cobb_douglas)$coefficients %>%
+      as.data.frame() %>%
+      mutate(
+        model = "Cobb-Douglas"
+      )
+  ) %>%
+  bind_rows(
+    summary(translog_model)$coefficients %>%
+      as.data.frame() %>%
+      mutate(
+        model = "Translog"
+      )
+  ) %>%
+  bind_rows(
+    summary(quadratic_model)$coefficients %>%
+      as.data.frame() %>%
+      mutate(
+        model = "Quadratic"
+      )
+  ) %>%
+  select(model, everything())
+
+library(knitr)
+
+kable(summary_stats, caption = "Deskriptiv statistikk", digits = 2, format = "pipe") %>% kable_styling(full_width = F, bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+```{r}
+dataid <- df_rice1 %>% count(id)
+
+ dataid2<-summary(dataid)
+
+kable(dataid2, caption = "Number of observations for eatch farm, se n")
+```
+
+```{r}
+datacount <- df_rice1 %>%
+  pivot_longer(cols = c(region, status, varieties, bimas), names_to = "Variable", values_to = "Value") %>%
+  count(Variable, Value)
+
+kable(datacount, caption = "Counting of variables with character")
+```
+
+## Production functions
+
+### cobb douglas production function
+
+```{r}
+summary(cobb_douglas)
+```
+
+```{r}
+logmodel$qOutCD <- exp(fitted(cobb_douglas))
+
+all.equal(
+  logmodel$qOutCD,
+  with(logmodel, exp(coef(cobb_douglas)[ "(Intercept)" ] ) *
+         log_seed^coef(cobb_douglas)[ "log_seed" ] *
+         log_urea^coef(cobb_douglas)[ "log_urea" ] *
+         log_totlabor^coef(cobb_douglas)[ "log_totlabor" ] *
+         log_size^coef(cobb_douglas)[ "log_size" ] *
+         log_phosphate^coef(cobb_douglas)[ "log_phosphate" ])
+)
+
+par(mfrow = c(1, 2))
+
+plot1 <- compPlot(logmodel$goutput, logmodel$qOutCD, col = "black",
+         xlab = "Observed Output", ylab = "Fitted Output",
+         main = "Cobb-Douglas Model: Observed vs Fitted (Linear Scale)")
+plot1 <- plot1 + abline(0, 1, col = "red")  
+plot1
+
+
+plot2 <- compPlot(logmodel$goutput, logmodel$qOutCD, log = "xy", col = "black",
+         xlab = "Observed Output (Log Scale)", ylab = "Fitted Output (Log Scale)",
+         main = "Cobb-Douglas Model: Observed vs Fitted (Logarithmic Scale)")
+plot2 <- plot2 + abline(0, 1, col = "red")  
+
+plot2
+par(mfrow = c(1, 1))
+```
+
+```{r}
+coeff_cobb <- coef(cobb_douglas)
+
+
+beta_seed <- coeff_cobb["log_seed"]
+beta_urea <- coeff_cobb["log_urea"]
+beta_totlabor <- coeff_cobb["log_totlabor"]
+beta_size <- coeff_cobb["log_size"]
+beta_phosphate <- coeff_cobb["log_phosphate"]
+
+
+
+logmodel$MP_seed <- beta_seed * logmodel$qOutCD / logmodel$seed
+logmodel$MP_urea <- beta_urea * logmodel$qOutCD / logmodel$urea
+logmodel$MP_totlabor <- beta_totlabor * logmodel$qOutCD / logmodel$totlabor
+logmodel$MP_size <- beta_size * logmodel$qOutCD / logmodel$size
+logmodel$MP_phosphate <- ifelse(logmodel$phosphate > 0, beta_phosphate * logmodel$qOutCD / logmodel$phosphate, NA)
+
+
+
+
+logmodel$MP_seed_obs <- beta_seed * logmodel$goutput / logmodel$seed
+logmodel$MP_urea_obs <- beta_urea * logmodel$goutput / logmodel$urea
+logmodel$MP_totlabor_obs <- beta_totlabor * logmodel$goutput / logmodel$totlabor
+logmodel$MP_size_obs <- beta_size * logmodel$goutput / logmodel$size
+logmodel$MP_phosphate_obs <- ifelse(logmodel$phosphate > 0, beta_phosphate * logmodel$goutput / logmodel$phosphate, NA)
+
+
+summary(logmodel[, c("MP_seed", "MP_urea", "MP_totlabor", "MP_size", 
+                     "MP_phosphate", "MP_seed_obs", "MP_urea_obs", "MP_totlabor_obs",
+                     "MP_size_obs", "MP_phosphate_obs")])
+```
+
+```{r}
+elasticity_of_scale <- sum(coef(cobb_douglas)[-1])  
+elasticity_of_scale
+```
+
+#### 3.1.2 Profit maximizing behavior
+
+```{r}
+logmodel$MVP_seed <- logmodel$price * logmodel$MP_seed
+logmodel$MVP_urea <- logmodel$price * logmodel$MP_urea
+logmodel$MVP_totlabor <- logmodel$price * logmodel$MP_totlabor
+logmodel$MVP_size <- logmodel$price * logmodel$MP_size
+logmodel$MVP_phosphate <- logmodel$price * logmodel$MP_phosphate
+
+
+par(mfrow = c(2, 2))
+
+
+compPlot(logmodel$pseed, logmodel$MVP_seed, log = "xy" )
+compPlot(logmodel$purea, logmodel$MVP_urea, log = "xy" )
+compPlot(logmodel$wage, logmodel$MVP_totlabor, log = "xy" )
+compPlot(logmodel$pphosph, logmodel$MVP_phosphate, log = "xy" )
+
+par(mfrow = c(1, 1))
+```
+
+#### 3.1.3 Cost minimization
+
+```{r}
+
+logmodel$mrtsSeedLabor <- - logmodel$MP_totlabor_obs / logmodel$MP_seed_obs
+logmodel$mrtsLaborSeed <- - logmodel$MP_seed_obs / logmodel$MP_totlabor_obs
+
+
+logmodel$mrtsSeedUrea <- - logmodel$MP_urea_obs / logmodel$MP_seed_obs
+logmodel$mrtsUreaSeed <- - logmodel$MP_seed_obs / logmodel$MP_urea_obs
+
+
+logmodel$mrtsSeedSize <- - logmodel$MP_size_obs / logmodel$MP_seed_obs
+logmodel$mrtsSizeSeed <- - logmodel$MP_seed_obs / logmodel$MP_size_obs
+
+
+logmodel$mrtsSeedPhosphate <- - logmodel$MP_phosphate_obs / logmodel$MP_seed_obs
+logmodel$mrtsPhosphateSeed <- - logmodel$MP_seed_obs / logmodel$MP_phosphate_obs
+
+
+logmodel$mrtsLaborUrea <- - logmodel$MP_urea_obs / logmodel$MP_totlabor_obs
+logmodel$mrtsUreaLabor <- - logmodel$MP_totlabor_obs / logmodel$MP_urea_obs
+
+
+logmodel$mrtsLaborSize <- - logmodel$MP_size_obs / logmodel$MP_totlabor_obs
+logmodel$mrtsSizeLabor <- - logmodel$MP_totlabor_obs / logmodel$MP_size_obs
+
+
+logmodel$mrtsLaborPhosphate <- - logmodel$MP_phosphate_obs / logmodel$MP_totlabor_obs
+logmodel$mrtsPhosphateLabor <- - logmodel$MP_totlabor_obs / logmodel$MP_phosphate_obs
+
+
+logmodel$mrtsUreaSize <- - logmodel$MP_size_obs / logmodel$MP_urea_obs
+logmodel$mrtsSizeUrea <- - logmodel$MP_urea_obs / logmodel$MP_size_obs
+
+
+logmodel$mrtsUreaPhosphate <- - logmodel$MP_phosphate_obs / logmodel$MP_urea_obs
+logmodel$mrtsPhosphateUrea <- - logmodel$MP_urea_obs / logmodel$MP_phosphate_obs
+
+
+logmodel$mrtsSizePhosphate <- - logmodel$MP_phosphate_obs / logmodel$MP_size_obs
+logmodel$mrtsPhosphateSize <- - logmodel$MP_size_obs / logmodel$MP_phosphate_obs
+```
+
+```{r}
+par(mfrow = c(2, 2))
+
+
+compPlot(logmodel$wage / logmodel$pseed, -logmodel$mrtsSeedLabor, log = "xy",
+         xlab = "Price Ratio (Wage/Seed)", ylab = "MRTS (Labor/Seed)",
+         main = "MRTS vs Price Ratio (Labor/Seed)")
+
+
+compPlot(logmodel$purea / logmodel$pseed, -logmodel$mrtsSeedUrea, log = "xy",
+         xlab = "Price Ratio (Urea/Seed)", ylab = "MRTS (Urea/Seed)",
+         main = "MRTS vs Price Ratio (Urea/Seed)")
+
+
+compPlot(logmodel$pphosph / logmodel$pseed, -logmodel$mrtsSeedPhosphate, log = "xy",
+         xlab = "Price Ratio (Phosphate/Seed)", ylab = "MRTS (Phosphate/Seed)",
+         main = "MRTS vs Price Ratio (Phosphate/Seed)")
+
+
+compPlot(logmodel$purea / logmodel$wage, -logmodel$mrtsLaborUrea, log = "xy",
+         xlab = "Price Ratio (Urea/Labor)", ylab = "MRTS (Labor/Urea)",
+         main = "MRTS vs Price Ratio (Labor/Urea)")
+par(mfrow = c(1, 1))
+par(mfrow = c(1, 2))
+
+compPlot(logmodel$pphosph / logmodel$wage, -logmodel$mrtsLaborPhosphate, log = "xy",
+         xlab = "Price Ratio (Phosphate/Labor)", ylab = "MRTS (Labor/Phosphate)",
+         main = "MRTS vs Price Ratio (Labor/Phosphate)")
+
+
+compPlot(logmodel$pphosph / logmodel$purea, -logmodel$mrtsUreaPhosphate, log = "xy",
+         xlab = "Price Ratio (Phosphate/Urea)", ylab = "MRTS (Urea/Phosphate)",
+         main = "MRTS vs Price Ratio (Urea/Phosphate)")
+
+
+par(mfrow = c(1, 1))
+```
+
+**marginal rates of technical substitution**
+
+```{r}
+
+par(mfrow = c(2, 2))  
+hist(logmodel$mrtsSeedLabor, breaks = 30, main = "MRTS: Seed vs Labor", 
+     xlab = "MRTS (Seed/Labor)", col = "skyblue", border = "black")
+
+
+hist(logmodel$mrtsLaborSeed, breaks = 30, main = "MRTS: Labor vs Seed", 
+     xlab = "MRTS (Labor/Seed)", col = "orange", border = "black")
+
+
+hist(logmodel$mrtsSeedUrea, breaks = 30, main = "MRTS: Seed vs Urea", 
+     xlab = "MRTS (Seed/Urea)", col = "green", border = "black")
+
+
+hist(logmodel$mrtsUreaSeed, breaks = 30, main = "MRTS: Urea vs Seed", 
+     xlab = "MRTS (Urea/Seed)", col = "purple", border = "black")
+
+par(mfrow = c(1, 1))
+par(mfrow = c(2, 2))
+
+hist(logmodel$mrtsSeedSize, breaks = 30, main = "MRTS: Seed vs Size", 
+     xlab = "MRTS (Seed/Size)", col = "red", border = "black")
+
+
+hist(logmodel$mrtsSizeSeed, breaks = 30, main = "MRTS: Size vs Seed", 
+     xlab = "MRTS (Size/Seed)", col = "yellow", border = "black")
+
+
+hist(logmodel$mrtsSeedPhosphate, breaks = 30, main = "MRTS: Seed vs Phosphate", 
+     xlab = "MRTS (Seed/Phosphate)", col = "blue", border = "black")
+
+
+hist(logmodel$mrtsPhosphateSeed, breaks = 30, main = "MRTS: Phosphate vs Seed", 
+     xlab = "MRTS (Phosphate/Seed)", col = "brown", border = "black")
+par(mfrow = c(1, 1))
+par(mfrow = c(2, 2))
+
+hist(logmodel$mrtsLaborUrea, breaks = 30, main = "MRTS: Labor vs Urea", 
+     xlab = "MRTS (Labor/Urea)", col = "grey", border = "black")
+
+
+hist(logmodel$mrtsUreaLabor, breaks = 30, main = "MRTS: Urea vs Labor", 
+     xlab = "MRTS (Urea/Labor)", col = "cyan", border = "black")
+
+
+hist(logmodel$mrtsLaborSize, breaks = 30, main = "MRTS: Labor vs Size", 
+     xlab = "MRTS (Labor/Size)", col = "magenta", border = "black")
+
+
+hist(logmodel$mrtsSizeLabor, breaks = 30, main = "MRTS: Size vs Labor", 
+     xlab = "MRTS (Size/Labor)", col = "pink", border = "black")
+par(mfrow = c(1, 1))
+par(mfrow = c(2, 2))
+
+hist(logmodel$mrtsLaborPhosphate, breaks = 30, main = "MRTS: Labor vs Phosphate", 
+     xlab = "MRTS (Labor/Phosphate)", col = "pink", border = "black")
+
+
+hist(logmodel$mrtsPhosphateLabor, breaks = 30, main = "MRTS: Phosphate vs Labor", 
+     xlab = "MRTS (Phosphate/Labor)", col = "yellow", border = "black")
+
+
+hist(logmodel$mrtsUreaSize, breaks = 30, main = "MRTS: Urea vs Size", 
+     xlab = "MRTS (Urea/Size)", col = "navy", border = "black")
+
+
+hist(logmodel$mrtsSizeUrea, breaks = 30, main = "MRTS: Size vs Urea", 
+     xlab = "MRTS (Size/Urea)", col = "orange", border = "black")
+par(mfrow = c(1, 1))
+par(mfrow = c(2, 2))
+
+hist(logmodel$mrtsUreaPhosphate, breaks = 30, main = "MRTS: Urea vs Phosphate", 
+     xlab = "MRTS (Urea/Phosphate)", col = "red", border = "black")
+
+
+hist(logmodel$mrtsPhosphateUrea, breaks = 30, main = "MRTS: Phosphate vs Urea", 
+     xlab = "MRTS (Phosphate/Urea)", col = "maroon", border = "black")
+
+
+hist(logmodel$mrtsSizePhosphate, breaks = 30, main = "MRTS: Size vs Phosphate", 
+     xlab = "MRTS (Size/Phosphate)", col = "purple", border = "black")
+
+
+hist(logmodel$mrtsPhosphateSize, breaks = 30, main = "MRTS: Phosphate vs Size", 
+     xlab = "MRTS (Phosphate/Size)", col = "skyblue", border = "black")
+
+
+par(mfrow = c(1, 1))
+```
+
+#### 3.1.4 Relative marginal rates of technical substitution
+
+```{r}
+
+rmrts_seed_labor <- coef(cobb_douglas)["log_seed"] / coef(cobb_douglas)["log_totlabor"]
+rmrts_seed_labor
+
+rmrts_seed_urea <- coef(cobb_douglas)["log_seed"] / coef(cobb_douglas)["log_urea"]
+rmrts_seed_urea
+
+rmrts_seed_size <- coef(cobb_douglas)["log_seed"] / coef(cobb_douglas)["log_size"]
+rmrts_seed_size
+
+rmrts_seed_phosphate <- coef(cobb_douglas)["log_seed"] / coef(cobb_douglas)["log_phosphate"]
+rmrts_seed_phosphate
+
+rmrts_labor_urea <- coef(cobb_douglas)["log_totlabor"] / coef(cobb_douglas)["log_urea"]
+rmrts_labor_urea
+
+rmrts_labor_size <- coef(cobb_douglas)["log_totlabor"] / coef(cobb_douglas)["log_size"]
+rmrts_labor_size
+
+rmrts_labor_phosphate <- coef(cobb_douglas)["log_totlabor"] / coef(cobb_douglas)["log_phosphate"]
+rmrts_labor_phosphate
+
+rmrts_urea_size <- coef(cobb_douglas)["log_urea"] / coef(cobb_douglas)["log_size"]
+rmrts_urea_size
+
+rmrts_urea_phosphate <- coef(cobb_douglas)["log_urea"] / coef(cobb_douglas)["log_phosphate"]
+rmrts_urea_phosphate
+
+rmrts_size_phosphate <- coef(cobb_douglas)["log_size"] / coef(cobb_douglas)["log_phosphate"]
+rmrts_size_phosphate
+
+rmrts_values_cb <- data.frame(
+  RMRTS_Seed_Labor = rmrts_seed_labor,
+  RMRTS_Seed_Urea = rmrts_seed_urea,
+  RMRTS_Seed_Size = rmrts_seed_size,
+  RMRTS_Seed_Phosphate = rmrts_seed_phosphate,
+  RMRTS_Labor_Urea = rmrts_labor_urea,
+  RMRTS_Labor_Size = rmrts_labor_size,
+  RMRTS_Labor_Phosphate = rmrts_labor_phosphate,
+  RMRTS_Urea_Size = rmrts_urea_size,
+  RMRTS_Urea_Phosphate = rmrts_urea_phosphate,
+  RMRTS_Size_Phosphate = rmrts_size_phosphate
+)
+
+
+
+print(rmrts_values_cb)
+```
+
+### 3.2 Quadratic production function
+
+```{r}
+summary(quadratic_model)
+```
+
+```{r}
+linear_model <- lm(goutput ~ seed + urea + totlabor + size + phosphate, data = df_rice)
+
+summary(linear_model)
+```
+
+```{r}
+library(lmtest)
+
+waldtest(linear_model, quadratic_model)
+```
+
+```{r}
+lrtest(linear_model, quadratic_model)
+```
+
+```{r}
+
+df_rice$qOutQuad <- fitted(quadratic_model)
+
+par(mfrow = c(1,2))
+
+plot3 <- plot(df_rice$goutput, df_rice$qOutQuad,
+     xlab = "Observed Output (goutput)",
+     ylab = "Predicted Output (Quadratic Model)",
+     main = "Observed vs Predicted Outputs",)
+plot3 <- plot3 + abline(0, 1, col = "red") 
+plot3
+
+
+plot4 <- plot(df_rice$goutput, df_rice$qOutQuad,
+     log = "xy",  
+     xlab = "Observed Output (log scale)",
+     ylab = "Predicted Output (log scale)",
+     main = "Observed vs Predicted Outputs (Log Scale)",)
+plot4 <- plot4 + abline(0, 1, col = "red")  
+plot4
+par(mfrow = c(1,1))
+```
+
+```{r}
+table(df_rice$qOutQuad >= 0)
+```
+
+```{r}
+df_rice <- df_rice %>%
+  filter(qOutQuad >= 0)
+table(df_rice$qOutQuad >= 0)
+```
+
+#### 3.2.1 Marginal products for quadratic model
+
+table(df_rice$mpSeed >=0)
+table(df_rice$mpUrea \>=0) table(df_rice$mpTotLabor >=0)
+table(df_rice$mpSize \>=0) table(df_rice\$mpPhosphate \>=0)
+
+df_rice\$monoQuad \<- with(df_rice, mpSeed \>= 0 & mpUrea \>= 0 & mpTotLabor \>= 0 & mpSize \>= 0 & mpPhosphate \>= 0)
+
+table(df_rice\$monoQuad)
+
+```{r}
+b1 <- coef(quadratic_model)["seed"]
+b2 <- coef(quadratic_model)["urea"]
+b3 <- coef(quadratic_model)["totlabor"]
+b4 <- coef(quadratic_model)["size"]
+b5 <- coef(quadratic_model)["phosphate"]
+
+b11 <- coef(quadratic_model)["I(0.5 * seed^2)"]
+b22 <- coef(quadratic_model)["I(0.5 * urea^2)"]
+b33 <- coef(quadratic_model)["I(0.5 * totlabor^2)"]
+b44 <- coef(quadratic_model)["I(0.5 * size^2)"]
+b55 <- coef(quadratic_model)["I(0.5 * phosphate^2)"]
+
+b12 <- b21 <- coef(quadratic_model)["I(seed * urea)"]
+b13 <- b31 <- coef(quadratic_model)["I(seed * totlabor)"]
+b14 <- b41 <- coef(quadratic_model)["I(seed * size)"]
+b15 <- b51 <- coef(quadratic_model)["I(seed * phosphate)"]
+
+b23 <- b32 <- coef(quadratic_model)["I(urea * totlabor)"]
+b24 <- b42 <- coef(quadratic_model)["I(urea * size)"]
+b25 <- b52 <- coef(quadratic_model)["I(urea * phosphate)"]
+
+b34 <- b43 <- coef(quadratic_model)["I(totlabor * size)"]
+b35 <- b53 <- coef(quadratic_model)["I(totlabor * phosphate)"]
+
+b45 <- b54 <- coef(quadratic_model)["I(size * phosphate)"]
+
+
+df_rice$mpSeed <- with(df_rice,
+                       b1 + b11 * seed + b12 * urea + b13 * totlabor + b14 * size + b15 * phosphate)
+
+df_rice$mpUrea <- with(df_rice,
+                       b2 + b21 * seed + b22 * urea + b23 * totlabor + b24 * size + b25 * phosphate)
+
+df_rice$mpTotLabor <- with(df_rice,
+                           b3 + b31 * seed + b32 * urea + b33 * totlabor + b34 * size + b35 * phosphate)
+
+df_rice$mpSize <- with(df_rice,
+                       b4 + b41 * seed + b42 * urea + b43 * totlabor + b44 * size + b45 * phosphate)
+
+df_rice$mpPhosphate <- with(df_rice,
+                            b5 + b51 * seed + b52 * urea + b53 * totlabor + b54 * size + b55 * phosphate)
+
+```
+
+```{r}
+par(mfrow = c(2,2))
+hist(df_rice$mpSeed, 15)
+hist(df_rice$mpUrea, 15)
+hist(df_rice$mpTotLabor, 15)
+hist(df_rice$mpSize, 15)
+par(mfrow = c(1, 1))
+hist(df_rice$mpPhosphate, 15)
+par(mfrow = c(1,1))
+```
+
+```{r}
+table(df_rice$mpSeed >=0)
+table(df_rice$mpUrea >=0)
+table(df_rice$mpTotLabor >=0)
+table(df_rice$mpSize >=0)
+table(df_rice$mpPhosphate >=0)
+
+
+df_rice$monoQuad <- with(df_rice, 
+                         mpSeed >= 0 & 
+                           mpUrea >= 0 & 
+                           mpTotLabor >= 0 & 
+                           mpSize >= 0 & 
+                           mpPhosphate >= 0)
+
+table(df_rice$monoQuad)
+```
+
+#### 3.2.2 Elasticities quadratic model
+
+```{r}
+df_rice$eSeed <- with(df_rice, mpSeed * seed / qOutQuad)
+df_rice$eUrea <- with(df_rice, mpUrea * urea / qOutQuad)
+df_rice$eTotLabor <- with(df_rice, mpTotLabor * totlabor / qOutQuad)
+df_rice$eSize <- with(df_rice, mpSize * size / qOutQuad)
+df_rice$ePhosphate <- with(df_rice, mpPhosphate * phosphate / qOutQuad)
+
+par(mfrow = c(2,2))
+hist(df_rice$eSeed, 15)
+hist(df_rice$eUrea, 15)
+hist(df_rice$eTotLabor, 15)
+hist(df_rice$eSize, 15)
+par(mfrow = c(1, 1))
+hist(df_rice$ePhosphate, 15)
+par(mfrow = c(1,1))
+```
+
+```{r}
+df_rice$eScale <- df_rice$eSeed + df_rice$eUrea + df_rice$eTotLabor + df_rice$eSize + df_rice$ePhosphate
+
+par(mfrow = c(1,2))
+hist(df_rice$eScale, 30)
+hist(df_rice$eScale[df_rice$monoQuad], 30)
+par(mfrow = c(1,1))
+```
+
+```{r}
+par(mfrow = c(1,2))
+plot5 <- plot(df_rice$goutput, df_rice$eScale, log = "x",
+     xlab = "Output (log scale)", ylab = "Returns to Scale (eScale)",
+     main = "Output vs. Returns to Scale")
+plot5 <- plot5 + abline(1, 0, col = "red")  
+plot5
+
+plot6 <- plot(df_rice$size, df_rice$eScale, log = "x",
+     xlab = "Size (log scale)", ylab = "Returns to Scale (eScale)",
+     main = "Size vs. Returns to Scale")
+plot6 <- plot6 + abline(1, 0, col = "red")  
+plot6
+par(mfrow = c(1,1))
+par(mfrow = c(1,2))
+plot(df_rice$goutput[df_rice$monoQuad], df_rice$eScale[df_rice$monoQuad], log = "x",
+     xlab = "Output (log scale)", ylab = "Returns to Scale (eScale)",
+     main = "Output vs. Returns to Scale (Filtered)")
+
+
+plot(df_rice$size[df_rice$monoQuad], df_rice$eScale[df_rice$monoQuad], log = "x",
+     xlab = "Size (log scale)", ylab = "Returns to Scale (eScale)",
+     main = "Size vs. Returns to Scale (Filtered)")
+par(mfrow = c(1,1))
+```
+
+### 3.3 Translog model
+
+```{r}
+summary(translog_model)
+```
+
+```{r}
+library(lmtest)
+waldtest(cobb_douglas, translog_model )
+```
+
+```{r}
+lrtest(cobb_douglas, translog_model )
+```
+
+```{r}
+
+logmodel$log_pred_output_translog <- fitted(translog_model)
+
+
+logmodel$qOutTL <- exp(logmodel$log_pred_output_translog)
+
+
+p1 <- ggplot(logmodel, aes(x = goutput, y = qOutTL)) +
+  geom_point(color = "blue") +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+  labs(title = "Observed vs Fitted Output (Linear Scale)",
+       x = "Observed Output",
+       y = "Fitted Output (Translog)") +
+  theme_minimal()
+
+
+p2 <- ggplot(logmodel, aes(x = goutput, y = qOutTL)) +
+  geom_point(color = "green") +
+  scale_x_log10() + 
+  scale_y_log10() +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+  labs(title = "Observed vs Fitted Output (Logarithmic Scale)",
+       x = "Observed Output (Log Scale)",
+       y = "Fitted Output (Log Scale)") +
+  theme_minimal()
+
+grid.arrange(p1, p2, ncol = 2)
+```
+
+#### 3.3.1 Output elasticities
+
+```{r}
+
+a_seed <- coef(translog_model)["log_seed"]
+a_labor <- coef(translog_model)["log_totlabor"]
+a_urea <- coef(translog_model)["log_urea"]
+a_size <- coef(translog_model)["log_size"]
+a_phosphate <- coef(translog_model)["log_phosphate"]
+
+
+a_seed2 <- coef(translog_model)["I(0.5 * log_seed^2)"]
+a_labor2 <- coef(translog_model)["I(0.5 * log_totlabor^2)"]
+a_urea2 <- coef(translog_model)["I(0.5 * log_urea^2)"]
+a_size2 <- coef(translog_model)["I(0.5 * log_size^2)"]
+a_phosphate2 <- coef(translog_model)["I(0.5 * log_phosphate^2)"]
+
+
+a_seed_labor <- coef(translog_model)["I(log_seed * log_totlabor)"]
+a_seed_urea <- coef(translog_model)["I(log_seed * log_urea)"]
+a_seed_size <- coef(translog_model)["I(log_seed * log_size)"]
+a_seed_phosphate <- coef(translog_model)["I(log_seed * log_phosphate)"]
+
+
+a_labor_urea <- coef(translog_model)["I(log_urea * log_totlabor)"]
+a_labor_size <- coef(translog_model)["I(log_totlabor * log_size)"]
+a_labor_phosphate <- coef(translog_model)["I(log_totlabor * log_phosphate)"]
+
+a_urea_size <- coef(translog_model)["I(log_urea * log_size)"]
+a_urea_phosphate <- coef(translog_model)["I(log_urea * log_phosphate)"]
+
+a_size_phosphate <- coef(translog_model)["I(log_size * log_phosphate)"]
+
+# Calculate output elasticities for each input
+logmodel$eSeedTL <- with(logmodel, 
+                         a_seed + a_seed2 * log_seed + 
+                           a_seed_labor * log_totlabor + 
+                           a_seed_urea * log_urea + 
+                           a_seed_size * log_size + 
+                           a_seed_phosphate * log_phosphate)
+
+logmodel$eLaborTL <- with(logmodel, 
+                          a_labor + a_labor2 * log_totlabor + 
+                            a_seed_labor * log_seed + 
+                            a_labor_urea * log_urea + 
+                            a_labor_size * log_size + 
+                            a_labor_phosphate * log_phosphate)
+
+logmodel$eUreaTL <- with(logmodel, 
+                         a_urea + a_urea2 * log_urea + 
+                           a_seed_urea * log_seed + 
+                           a_labor_urea * log_totlabor + 
+                           a_urea_size * log_size + 
+                           a_urea_phosphate * log_phosphate)
+
+logmodel$eSizeTL <- with(logmodel, 
+                         a_size + a_size2 * log_size + 
+                           a_seed_size * log_seed + 
+                           a_labor_size * log_totlabor + 
+                           a_urea_size * log_urea + 
+                           a_size_phosphate * log_phosphate)
+
+logmodel$ePhosphateTL <- with(logmodel, 
+                              a_phosphate + a_phosphate2 * log_phosphate + 
+                                a_seed_phosphate * log_seed + 
+                                a_labor_phosphate * log_totlabor + 
+                                a_urea_phosphate * log_urea + 
+                                a_size_phosphate * log_size)
+
+
+head(logmodel[, c("eSeedTL", "eLaborTL", "eUreaTL", "eSizeTL", "ePhosphateTL")])
+
+
+library(ggplot2)
+
+
+p1 <- ggplot(logmodel, aes(x = eSeedTL)) +
+  geom_histogram(binwidth = 0.05, fill = "blue", color = "black", alpha = 0.7) +
+  labs(title = "Histogram of Output Elasticity for Seed",
+       x = "Elasticity of Seed",
+       y = "Frequency") +
+  theme_minimal()
+
+
+p2 <- ggplot(logmodel, aes(x = eLaborTL)) +
+  geom_histogram(binwidth = 0.05, fill = "orange", color = "black", alpha = 0.7) +
+  labs(title = "Histogram of Output Elasticity for Labor",
+       x = "Elasticity of Labor",
+       y = "Frequency") +
+  theme_minimal()
+
+
+p3 <- ggplot(logmodel, aes(x = eUreaTL)) +
+  geom_histogram(binwidth = 0.05, fill = "green", color = "black", alpha = 0.7) +
+  labs(title = "Histogram of Output Elasticity for Urea",
+       x = "Elasticity of Urea",
+       y = "Frequency") +
+  theme_minimal()
+
+
+p4 <- ggplot(logmodel, aes(x = eSizeTL)) +
+  geom_histogram(binwidth = 0.05, fill = "purple", color = "black", alpha = 0.7) +
+  labs(title = "Histogram of Output Elasticity for Size",
+       x = "Elasticity of Size",
+       y = "Frequency") +
+  theme_minimal()
+
+
+p5 <- ggplot(logmodel, aes(x = ePhosphateTL)) +
+  geom_histogram(binwidth = 0.05, fill = "red", color = "black", alpha = 0.7) +
+  labs(title = "Histogram of Output Elasticity for Phosphate",
+       x = "Elasticity of Phosphate",
+       y = "Frequency") +
+  theme_minimal()
+
+
+library(gridExtra)
+grid.arrange(p1, p2, p3, p4, p5, ncol = 3)
+```
+
+```{r}
+table(logmodel$eSeedTL >= 0)
+table(logmodel$eLaborTL >= 0)
+table(logmodel$eUreaTL >= 0)  
+table(logmodel$eSizeTL >= 0)
+table(logmodel$ePhosphateTL >= 0)
+```
+
+```{r}
+logmodel$monoTL <- with(logmodel, eSeedTL >= 0 & eLaborTL >= 0 & eUreaTL >= 0 & eSizeTL >= 0 & ePhosphateTL >= 0)
+table(logmodel$monoTL )
+```
+
+#### 3.3.2 Marginal product translog model
+
+```{r}
+
+logmodel$qOutTL <- exp(fitted(translog_model))  
+
+logmodel$MP_seed <- with(logmodel, qOutTL / seed * eSeedTL)
+logmodel$MP_labor <- with(logmodel, qOutTL / totlabor * eLaborTL)
+logmodel$MP_urea <- with(logmodel, qOutTL / urea * eUreaTL)
+logmodel$MP_size <- with(logmodel, qOutTL / size * eSizeTL)
+
+
+logmodel$MP_phosphate <- with(logmodel, ifelse(phosphate > 0, qOutTL / phosphate * ePhosphateTL, NA))
+logmodel$MP_phosphate[is.na(logmodel$MP_phosphate)] <- 0
+
+
+summary(logmodel[, c("MP_seed", "MP_labor", "MP_urea", "MP_size", "MP_phosphate")])
+
+par(mfrow = c(2, 2))  
+hist(logmodel$MP_seed, breaks = 30, main = "Histogram of MP for Seed", 
+     xlab = "MP for Seed", col = "skyblue", border = "black")
+
+hist(logmodel$MP_labor, breaks = 30, main = "Histogram of MP for Labor", 
+     xlab = "MP for labor", col = "red", border = "black")
+
+hist(logmodel$MP_urea, breaks = 30, main = "Histogram of MP for urea", 
+     xlab = "MP for urea", col = "green", border = "black")
+
+hist(logmodel$MP_size, breaks = 30, main = "Histogram of MP for Size", 
+     xlab = "MP for size", col = "purple", border = "black")
+par(mfrow = c(1, 1))
+hist(logmodel$MP_phosphate, breaks = 30, main = "Histogram of MP for phosphate", 
+     xlab = "MP for phosphate", col = "orange", border = "black")
+
+par(mfrow = c(1, 1))
+```
+
+#### 3.3.3 Returns to scale translog model
+
+```{r}
+logmodel$RTS <- with(logmodel, eSeedTL + eLaborTL + eUreaTL + eSizeTL + ePhosphateTL)
+
+par(mfrow = c(1, 2))  
+
+
+hist(logmodel$RTS, breaks = 30, main = "Histogram of Return to Scale", 
+     xlab = "Return to Scale", col = "blue", border = "black")
+
+hist(logmodel$RTS [logmodel$monoTL], breaks = 30, main = "Histogram of RTS when monotonicity is satisfied",
+     xlab = "Return to Scale", col = "red", border = "black")
+
+par(mfrow = c(1, 1))
+```
+
+### 3.4 Goodness of fit analysis
+
+```{r}
+summary(linear_model)$r.squared
+
+rSquared(logmodel$goutput, logmodel$goutput - exp(fitted(cobb_douglas)))
+
+summary(quadratic_model)$r.squared
+
+rSquared(logmodel$goutput, logmodel$goutput - exp(fitted(translog_model)))
+```
+
+```{r}
+#rSquared(log(df_rice$goutput[df_rice$gOutLin > 0]), log(df_rice$goutput[df_rice$gOutLin > 0])
+#         - log(df_rice$gOutLin[df_rice$gOutLin > 0]))
+
+# The code above gave us an output of 0.8001924, but have to large values when doing the code in quarto.
+
+summary(cobb_douglas)$r.squared
+
+rSquared(log(df_rice$goutput), log(df_rice$goutput) - log(df_rice$qOutQuad))
+
+summary(translog_model)$r.squared
+```
+
+### 3.5 Reset test
+
+```{r}
+reset_test_linear <- resettest(linear_model, power = 2:3)
+summary(reset_test_linear)
+print(reset_test_linear)
+```
+
+```{r}
+reset_test_cobb <- resettest(cobb_douglas, power = 2:3)
+summary(reset_test_cobb)
+print(reset_test_cobb)
+```
+
+```{r}
+reset_test_quadratic <- resettest(quadratic_model, power = 2:3)
+summary(reset_test_quadratic)
+print(reset_test_quadratic)
+```
+
+```{r}
+reset_test_translog <- resettest(translog_model, power = 2:3)
+summary(reset_test_translog)
+print(reset_test_translog)
+```
+
+## 4. Cost function
+
+### 4.1 Short run cost function
+
+```{r}
+logmodel$TVC <- logmodel$wage * logmodel$totlabor + 
+  logmodel$pseed * logmodel$seed + 
+  logmodel$purea * logmodel$urea + 
+  logmodel$pphosph * logmodel$phosphate
+```
+
+```{r}
+logmodel$log_TVC <- log(logmodel$TVC)
+logmodel$log_wseed <- log(logmodel$pseed)
+logmodel$log_wurea <- log(logmodel$purea)
+logmodel$log_wlabor <- log(logmodel$wage)
+logmodel$log_wphosphate <- log(logmodel$pphosph)
+logmodel$log_size <- log(logmodel$size)
+logmodel$log_output <- log(logmodel$goutput)
+
+
+
+cost_function <- lm(log_TVC ~ log_wseed + log_wurea + log_wlabor + log_wphosphate + log_size + log_output, data = logmodel)
+
+
+summary(cost_function)
+vif(cost_function)
+
+0.02093+0.77028+0.75417-0.41407
+```
+
+### 4.2 Applying Sheppard's lemma
+
+```{r}
+cost_ip <- lm(log_TVC - log_wlabor ~ (log_wseed - log_wlabor) + (log_wurea - log_wlabor) + 
+                (log_wphosphate - log_wlabor) + log_size + log_output, data = logmodel)
+
+
+summary(cost_ip)
+
+
+
+
+cost_ip <- lm( log(TVC/pseed ) ~ log(wage / pseed) + log (purea / pseed )+
+                 log( pphosph / pseed ) + log(size) + log(goutput),
+               data = logmodel )
+
+
+summary(cost_ip)
+
+
+lrtest(cost_ip, cost_function)
+
+
+
+beta_Slabor <- coef(cost_function)["log_wlabor"]
+beta_Surea <- coef(cost_function)["log_wurea"]
+beta_Sseed <- coef(cost_function)["log_wseed"]
+beta_Sphosphate <- coef(cost_function)["log_wphosphate"]
+
+
+logmodel$demand_labor <- beta_Slabor * logmodel$log_TVC / logmodel$log_wlabor
+logmodel$demand_urea <- beta_Surea * logmodel$log_TVC / logmodel$log_wurea
+logmodel$demand_seed <- beta_Sseed * logmodel$log_TVC / logmodel$log_wseed
+logmodel$demand_phosphate <- beta_Sphosphate * logmodel$log_TVC / logmodel$log_wphosphate
+
+
+summary(logmodel[, c("demand_labor", "demand_urea", "demand_seed", "demand_phosphate")])
+```
+
+## 8. Appendix
+
+mrts quadratic
+
+```{r}
+df_rice$mrtsUreaSeed <- with(df_rice, -mpUrea / mpSeed)        
+df_rice$mrtsSeedUrea <- with(df_rice, -mpSeed / mpUrea)       
+
+df_rice$mrtsTotLaborSeed <- with(df_rice, -mpTotLabor / mpSeed)
+df_rice$mrtsSeedTotLabor <- with(df_rice, -mpSeed / mpTotLabor) 
+
+df_rice$mrtsTotLaborUrea <- with(df_rice, -mpTotLabor / mpUrea) 
+df_rice$mrtsUreaTotLabor <- with(df_rice, -mpUrea / mpTotLabor) 
+
+df_rice$mrtsSizeSeed <- with(df_rice, -mpSize / mpSeed)        
+df_rice$mrtsSeedSize <- with(df_rice, -mpSeed / mpSize)        
+
+df_rice$mrtsPhosphateSeed <- with(df_rice, -mpPhosphate / mpSeed) 
+df_rice$mrtsSeedPhosphate <- with(df_rice, -mpSeed / mpPhosphate) 
+
+df_rice$mrtsPhosphateTotLabor <- with(df_rice, -mpPhosphate / mpTotLabor) 
+df_rice$mrtsTotLaborPhosphate <- with(df_rice, -mpTotLabor / mpPhosphate) 
+
+
+
+
+par(mfrow = c(2,2))
+hist(df_rice$mrtsUreaSeed[df_rice$monoQuad], 30)
+hist(df_rice$mrtsSeedUrea[df_rice$monoQuad], 30)
+hist(df_rice$mrtsTotLaborSeed[df_rice$monoQuad], 30)
+hist(df_rice$mrtsSeedTotLabor[df_rice$monoQuad], 30)
+par(mfrow = c(1, 1))
+par(mfrow = c(2, 2))
+hist(df_rice$mrtsTotLaborUrea[df_rice$monoQuad], 30)
+hist(df_rice$mrtsUreaTotLabor[df_rice$monoQuad], 30)
+hist(df_rice$mrtsSizeSeed[df_rice$monoQuad], 30)
+hist(df_rice$mrtsSeedSize[df_rice$monoQuad], 30)
+par(mfrow = c(1, 1))
+par(mfrow = c(2, 2))
+hist(df_rice$mrtsPhosphateSeed[df_rice$monoQuad], 30)
+hist(df_rice$mrtsSeedPhosphate[df_rice$monoQuad], 30)
+hist(df_rice$mrtsPhosphateTotLabor[df_rice$monoQuad], 30)
+hist(df_rice$mrtsTotLaborPhosphate[df_rice$monoQuad], 30)
+par(mfrow = c(1,1))
+```
+
+```{r}
+
+filtered_data <- subset(df_rice, monoQuad, 
+                        select = c("mrtsUreaSeed", "mrtsSeedUrea", 
+                                   "mrtsTotLaborSeed", "mrtsSeedTotLabor", 
+                                   "mrtsPhosphateSeed", "mrtsSeedPhosphate"))
+
+
+col_medians <- apply(filtered_data, 2, median, na.rm = TRUE)
+
+
+col_medians
+```
+
+rmrts quadratic
+
+```{r}
+df_rice$rmrtsUreaSeed <- with(df_rice, -eUrea / eSeed)         
+df_rice$rmrtsSeedUrea <- with(df_rice, -eSeed / eUrea)         
+
+df_rice$rmrtsTotLaborSeed <- with(df_rice, -eTotLabor / eSeed)
+df_rice$rmrtsSeedTotLabor <- with(df_rice, -eSeed / eTotLabor) 
+
+df_rice$rmrtsTotLaborUrea <- with(df_rice, -eTotLabor / eUrea) 
+df_rice$rmrtsUreaTotLabor <- with(df_rice, -eUrea / eTotLabor) 
+
+df_rice$rmrtsSizeSeed <- with(df_rice, -eSize / eSeed)        
+df_rice$rmrtsSeedSize <- with(df_rice, -eSeed / eSize)         
+
+df_rice$rmrtsPhosphateSeed <- with(df_rice, -ePhosphate / eSeed) 
+df_rice$rmrtsSeedPhosphate <- with(df_rice, -eSeed / ePhosphate) 
+
+df_rice$rmrtsPhosphateTotLabor <- with(df_rice, -ePhosphate / eTotLabor) 
+df_rice$rmrtsTotLaborPhosphate <- with(df_rice, -eTotLabor / ePhosphate) 
+
+
+par(mfrow = c(2,2))
+hist(df_rice$rmrtsUreaSeed[df_rice$monoQuad])
+hist(df_rice$rmrtsSeedUrea[df_rice$monoQuad])
+hist(df_rice$rmrtsTotLaborSeed[df_rice$monoQuad])
+hist(df_rice$rmrtsSeedTotLabor[df_rice$monoQuad])
+par(mfrow = c(1, 1))
+par(mfrow = c(2, 2))
+hist(df_rice$rmrtsTotLaborUrea[df_rice$monoQuad])
+hist(df_rice$rmrtsUreaTotLabor[df_rice$monoQuad])
+hist(df_rice$rmrtsSizeSeed[df_rice$monoQuad])
+hist(df_rice$rmrtsSeedSize[df_rice$monoQuad])
+par(mfrow = c(1, 1))
+par(mfrow = c(2, 2))
+hist(df_rice$rmrtsPhosphateSeed[df_rice$monoQuad])
+hist(df_rice$rmrtsSeedPhosphate[df_rice$monoQuad])
+hist(df_rice$rmrtsPhosphateTotLabor[df_rice$monoQuad])
+hist(df_rice$rmrtsTotLaborPhosphate[df_rice$monoQuad])
+par(mfrow = c(1,1))
+```
+
+```{r}
+
+filtered_data <- subset(df_rice, monoQuad, 
+                        select = c("rmrtsUreaSeed", "rmrtsSeedUrea", 
+                                   "rmrtsTotLaborSeed", "rmrtsSeedTotLabor", 
+                                   "rmrtsPhosphateSeed", "rmrtsSeedPhosphate"))
+
+
+col_medians <- apply(filtered_data, 2, median, na.rm = TRUE)
+
+
+col_medians
+```
+
+MRTS translog model
+
+```{r}
+
+logmodel$mrtsSeedLaborTL <- - logmodel$MP_labor / logmodel$MP_seed
+
+
+logmodel$mrtsSeedUreaTL <- - logmodel$MP_urea / logmodel$MP_seed
+
+
+logmodel$mrtsSeedSizeTL <- - logmodel$MP_size / logmodel$MP_seed
+
+
+logmodel$mrtsSeedPhosphateTL <- - logmodel$MP_phosphate / logmodel$MP_seed
+
+
+logmodel$mrtsLaborUreaTL <- - logmodel$MP_urea / logmodel$MP_labor
+
+
+logmodel$mrtsLaborSizeTL <- - logmodel$MP_size / logmodel$MP_labor
+
+
+logmodel$mrtsLaborPhosphateTL <- - logmodel$MP_phosphate / logmodel$MP_labor
+
+
+logmodel$mrtsUreaSizeTL <- - logmodel$MP_size / logmodel$MP_urea
+
+
+logmodel$mrtsUreaPhosphateTL <- - logmodel$MP_phosphate / logmodel$MP_urea
+
+
+logmodel$mrtsSizePhosphateTL <- - logmodel$MP_phosphate / logmodel$MP_size
+
+
+head(logmodel[, c("mrtsSeedLaborTL", "mrtsSeedUreaTL", "mrtsSeedSizeTL", "mrtsSeedPhosphateTL", 
+                  "mrtsLaborUreaTL", "mrtsLaborSizeTL", "mrtsLaborPhosphateTL",
+                  "mrtsUreaSizeTL", "mrtsUreaPhosphateTL", "mrtsSizePhosphateTL")])
+
+colMeans(logmodel[, c("mrtsSeedLaborTL", "mrtsSeedUreaTL", "mrtsSeedSizeTL", "mrtsSeedPhosphateTL", 
+                                  "mrtsLaborUreaTL", "mrtsLaborSizeTL", "mrtsLaborPhosphateTL",
+                                  "mrtsUreaSizeTL", "mrtsUreaPhosphateTL", "mrtsSizePhosphateTL")], na.rm = TRUE)
+
+```
+
+**RMRTS translog**
+
+```{r}
+
+logmodel$rmrtsSeedLaborTL <- with(logmodel, - eLaborTL / eSeedTL)
+logmodel$rmrtsLaborSeedTL <- with(logmodel, - eSeedTL / eLaborTL)
+
+
+logmodel$rmrtsSeedUreaTL <- with(logmodel, - eUreaTL / eSeedTL)
+logmodel$rmrtsUreaSeedTL <- with(logmodel, - eSeedTL / eUreaTL)
+
+
+logmodel$rmrtsSeedSizeTL <- with(logmodel, - eSizeTL / eSeedTL)
+logmodel$rmrtsSizeSeedTL <- with(logmodel, - eSeedTL / eSizeTL)
+
+
+logmodel$rmrtsSeedPhosphateTL <- with(logmodel, - ePhosphateTL / eSeedTL)
+logmodel$rmrtsPhosphateSeedTL <- with(logmodel, - eSeedTL / ePhosphateTL)
+
+
+logmodel$rmrtsLaborUreaTL <- with(logmodel, - eUreaTL / eLaborTL)
+logmodel$rmrtsUreaLaborTL <- with(logmodel, - eLaborTL / eUreaTL)
+
+
+logmodel$rmrtsLaborSizeTL <- with(logmodel, - eSizeTL / eLaborTL)
+logmodel$rmrtsSizeLaborTL <- with(logmodel, - eLaborTL / eSizeTL)
+
+
+logmodel$rmrtsLaborPhosphateTL <- with(logmodel, - ePhosphateTL / eLaborTL)
+logmodel$rmrtsPhosphateLaborTL <- with(logmodel, - eLaborTL / ePhosphateTL)
+
+
+logmodel$rmrtsUreaSizeTL <- with(logmodel, - eSizeTL / eUreaTL)
+logmodel$rmrtsSizeUreaTL <- with(logmodel, - eUreaTL / eSizeTL)
+
+
+logmodel$rmrtsUreaPhosphateTL <- with(logmodel, - ePhosphateTL / eUreaTL)
+logmodel$rmrtsPhosphateUreaTL <- with(logmodel, - eUreaTL / ePhosphateTL)
+
+
+logmodel$rmrtsSizePhosphateTL <- with(logmodel, - ePhosphateTL / eSizeTL)
+logmodel$rmrtsPhosphateSizeTL <- with(logmodel, - eSizeTL / ePhosphateTL)
+
+
+summary(logmodel[, grep("rmrts", colnames(logmodel))])
+```
