@@ -1,0 +1,105 @@
+---
+title: "Assignment1"
+author: "Kandidat 33,"
+format: pdf
+editor: visual
+---
+
+\newpage
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+# legger til for at jeg skal kunne bruke norsk p?? denne maskinen
+Sys.setlocale("LC_ALL", "en_US.UTF-8")
+
+```
+
+## Innledning
+
+her har vi....
+
+## Data
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+#laster inn pakker man trenger
+#datasettet jeg ??nsker ?? bruke ligger i pakken "benchmarking"
+library(tidyverse)
+library(ggplot2)
+library(mosaic)
+library(statisticalModeling)
+library(sfaR)
+library(kableExtra)
+library(knitr)
+
+#t??mmer enviroment
+rm(list = ls())
+
+setwd("C:/Users/Ida Marie/Documents/Dokumenter/UiT/UiT C%r 4/Sok-3011 LinC&re regresjoner/Assignment1/")
+
+#henter inn datasettet
+
+data <- read.csv("RiceFarms.csv", header = TRUE, sep = ",")
+
+#ser over datasettet hva slags variabler vi har
+#help("pigdata")
+
+
+```
+
+I dette kapittelet skal vi se p?? dataene vi har og hvilke variabler vi blir ?? bruke.
+
+```{r, echo=FALSE, warning=FALSE}
+
+#trekker ut til tabell
+
+data1 <- data[, !names(data) %in% c("rownames", "id", "status", "varieties", "bimas", "region")]
+
+# Beregner statistikken
+summary(data1)
+
+
+
+
+
+```
+
+```{r}
+# Beregn oppsummering for alle variablene i data
+summary_stats <- summary(data1)
+
+library(knitr)
+
+# Viser tabellen i pent format
+kable(summary_stats, caption = "Deskriptiv statistikk", digits = 2, format = "pipe") %>% kable_styling(full_width = F, bootstrap_options = c("striped", "hover", "condensed"))
+
+```
+
+```{r}
+#lage statistikk/oversikt over de kategoriske variablene
+
+dataid <- data %>% count(id)
+
+ dataid2<-summary(dataid)
+
+kable(dataid2, caption = "Number of observations for eatch farm, se n")
+
+datacount <- data %>%
+  pivot_longer(cols = c(region, status, varieties, bimas), names_to = "Variable", values_to = "Value") %>%
+  count(Variable, Value)
+
+kable(datacount, caption = "Counting of variables with character")
+```
+
+```{r}
+
+linear_model <- lm(goutput ~ seed + urea + totlabor + size + phosphate, data = data)
+
+#seed + urea + totlabor + size + phosphate ???-- Input
+summary(linear_model)
+```
+
+```{r}
+data$input <- data$seed + data$urea + data$totlabor + data$size + data$phosphate
+
+# Se p?? de f??rste radene for ?? bekrefte at den nye variabelen er lagt til
+head(data)
+```
